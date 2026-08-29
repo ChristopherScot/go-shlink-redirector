@@ -200,28 +200,44 @@ func TestHandleCreate_MissingURL(t *testing.T) {
 	}
 }
 
-func TestHandleCreate_AddsScheme(t *testing.T) {
-	var got string
-	shlink := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, _ := io.ReadAll(r.Body)
-		var in struct {
-			LongURL string `json:"longUrl"`
-		}
-		json.Unmarshal(body, &in)
-		got = in.LongURL
-		json.NewEncoder(w).Encode(map[string]string{"shortUrl": "https://go/x"})
-	}))
-	defer shlink.Close()
+func TestHandleCreate_SchemeHandling(t *testing.T) {
+	cases := []struct {
+		in, want string
+	}{
+		{"example.com/path", "http://example.com/path"},
+		{"http://x.example/y", "http://x.example/y"},
+		{"https://x.example/y", "https://x.example/y"},
+		{"mailto:foo@x.example", "mailto:foo@x.example"},
+		{"tel:+15551234", "tel:+15551234"},
+		{"slack://channel?team=T", "slack://channel?team=T"},
+		{"obsidian://open?vault=N", "obsidian://open?vault=N"},
+		{"magnet:?xt=urn:btih:abc", "magnet:?xt=urn:btih:abc"},
+	}
+	for _, c := range cases {
+		t.Run(c.in, func(t *testing.T) {
+			var got string
+			shlink := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				body, _ := io.ReadAll(r.Body)
+				var in struct {
+					LongURL string `json:"longUrl"`
+				}
+				json.Unmarshal(body, &in)
+				got = in.LongURL
+				json.NewEncoder(w).Encode(map[string]string{"shortUrl": "https://go/x"})
+			}))
+			defer shlink.Close()
 
-	r := newTestResolver(t, shlink.URL)
-	form := url.Values{}
-	form.Set("longUrl", "example.com/path")
-	req := httptest.NewRequest("POST", "/x", strings.NewReader(form.Encode()))
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req = withChiParam(req, "slug", "x")
-	rec := httptest.NewRecorder()
-	r.handleCreate(rec, req)
-	if got != "https://example.com/path" {
-		t.Errorf("longUrl sent to shlink = %q, want scheme prepended", got)
+			r := newTestResolver(t, shlink.URL)
+			form := url.Values{}
+			form.Set("longUrl", c.in)
+			req := httptest.NewRequest("POST", "/x", strings.NewReader(form.Encode()))
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			req = withChiParam(req, "slug", "x")
+			rec := httptest.NewRecorder()
+			r.handleCreate(rec, req)
+			if got != c.want {
+				t.Errorf("longUrl sent to shlink = %q, want %q", got, c.want)
+			}
+		})
 	}
 }

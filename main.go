@@ -10,12 +10,18 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 )
+
+// hasScheme matches an RFC-3986 scheme (letter, then letter/digit/+/-/.)
+// followed by a colon. Covers http://, mailto:, tel:, slack://, obsidian://,
+// magnet:, etc. — anything with a scheme is left alone.
+var hasScheme = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9+.\-]*:`)
 
 type config struct {
 	shlinkAPI    string
@@ -183,9 +189,13 @@ func (r *resolver) handleCreate(w http.ResponseWriter, req *http.Request) {
 		r.tmpl.Execute(w, createPageData{Slug: slug, Error: "Please enter a URL."})
 		return
 	}
-	// Give a bare hostname a scheme.
-	if !strings.HasPrefix(longURL, "http://") && !strings.HasPrefix(longURL, "https://") {
-		longURL = "https://" + longURL
+	// Give a bare hostname a scheme. Default http:// (not https://) so
+	// intranet/dev URLs work — if the target actually enforces HTTPS
+	// it'll upgrade on its own; the reverse isn't true. Anything that
+	// already has a scheme (http, https, mailto, tel, slack, obsidian,
+	// magnet, …) is left alone.
+	if !hasScheme.MatchString(longURL) {
+		longURL = "http://" + longURL
 	}
 	if _, err := r.createShortURL(slug, longURL); err != nil {
 		r.logger.ErrorContext(req.Context(), "create failed",
@@ -297,7 +307,7 @@ form {
   align-items: stretch;
   flex-wrap: wrap;
 }
-input[type=url] {
+input[type=text] {
   flex: 1 1 20rem;
   min-width: 0;
   padding: 1rem 1.15rem;
@@ -309,7 +319,7 @@ input[type=url] {
   color: inherit;
   transition: border-color .15s;
 }
-input[type=url]:focus {
+input[type=text]:focus {
   outline: none;
   border-color: var(--accent);
 }
@@ -343,7 +353,7 @@ code {
   <p class="hint">Paste or type a URL to point <code>go/{{.Slug}}</code> at, then press Enter.</p>
   {{if .Error}}<p class="err">{{.Error}}</p>{{end}}
   <form method="post" action="/{{.Slug}}" id="f">
-    <input id="u" name="longUrl" type="url" placeholder="https://example.com/…" required autofocus autocomplete="off" autocapitalize="off" spellcheck="false">
+    <input id="u" name="longUrl" type="text" inputmode="url" placeholder="example.com/…" required autofocus autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
     <button type="submit">Create</button>
   </form>
 </main>
