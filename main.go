@@ -253,35 +253,121 @@ const createTmpl = `<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
 <title>Create go/{{.Slug}}</title>
 <style>
-:root { color-scheme: light dark; }
-body { font: 16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-       max-width: 34rem; margin: 4rem auto; padding: 0 1rem; }
-h1 { font-size: 1.4rem; margin: 0 0 .25rem; }
-p.hint { color: color-mix(in oklab, currentColor 60%, transparent); margin: 0 0 1.5rem; }
-form { display: grid; gap: .75rem; }
-label { font-weight: 600; font-size: .9rem; }
-input[type=url] { padding: .6rem .75rem; font-size: 1rem; border-radius: .5rem;
-                  border: 1px solid color-mix(in oklab, currentColor 30%, transparent);
-                  background: transparent; color: inherit; }
-button { padding: .6rem 1.2rem; font-size: 1rem; font-weight: 600; border: none;
-         border-radius: .5rem; background: #2563eb; color: white; cursor: pointer; }
-button:hover { background: #1d4ed8; }
-.err { color: #dc2626; margin: 0 0 1rem; }
-code { background: color-mix(in oklab, currentColor 12%, transparent);
-       padding: .1rem .4rem; border-radius: .25rem; }
+:root {
+  --bg: #ffffff;
+  --fg: #111827;
+  --muted: #6b7280;
+  --border: #d1d5db;
+  --accent: #2563eb;
+  --accent-hover: #1d4ed8;
+  --err: #dc2626;
+  --code-bg: rgba(0,0,0,.06);
+  color-scheme: light dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0b0f19;
+    --fg: #e5e7eb;
+    --muted: #9ca3af;
+    --border: #374151;
+    --accent: #3b82f6;
+    --accent-hover: #60a5fa;
+    --err: #f87171;
+    --code-bg: rgba(255,255,255,.08);
+  }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; background: var(--bg); color: var(--fg); }
+body {
+  font: 16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 2rem 1rem;
+}
+main { width: 100%; max-width: 40rem; }
+h1 { font-size: 1.6rem; margin: 0 0 .35rem; font-weight: 700; }
+p.hint { color: var(--muted); margin: 0 0 2rem; font-size: 1rem; }
+form { display: grid; gap: 1rem; }
+input[type=url] {
+  width: 100%;
+  padding: 1rem 1.15rem;
+  font: inherit;
+  font-size: 1.15rem;
+  border-radius: .6rem;
+  border: 1.5px solid var(--border);
+  background: transparent;
+  color: inherit;
+  transition: border-color .15s;
+}
+input[type=url]:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+button {
+  padding: .85rem 1.5rem;
+  font: inherit;
+  font-size: 1rem;
+  font-weight: 600;
+  border: none;
+  border-radius: .6rem;
+  background: var(--accent);
+  color: white;
+  cursor: pointer;
+  transition: background .15s;
+  justify-self: start;
+}
+button:hover { background: var(--accent-hover); }
+.err { color: var(--err); margin: 0 0 1rem; font-weight: 500; }
+code {
+  background: var(--code-bg);
+  padding: .15rem .4rem;
+  border-radius: .3rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: .95em;
+}
 </style>
 </head>
 <body>
-<h1>go/{{.Slug}} doesn't exist yet</h1>
-<p class="hint">Enter a URL to point <code>go/{{.Slug}}</code> at.</p>
-{{if .Error}}<p class="err">{{.Error}}</p>{{end}}
-<form method="post" action="/{{.Slug}}">
-  <label for="longUrl">Long URL</label>
-  <input id="longUrl" name="longUrl" type="url" placeholder="https://example.com/…" required autofocus>
-  <button type="submit">Create</button>
-</form>
+<main>
+  <h1>go/{{.Slug}} doesn't exist yet</h1>
+  <p class="hint">Paste or type a URL to point <code>go/{{.Slug}}</code> at, then press Enter.</p>
+  {{if .Error}}<p class="err">{{.Error}}</p>{{end}}
+  <form method="post" action="/{{.Slug}}" id="f">
+    <input id="u" name="longUrl" type="url" placeholder="https://example.com/…" required autofocus autocomplete="off" autocapitalize="off" spellcheck="false">
+    <button type="submit">Create</button>
+  </form>
+</main>
+<script>
+(function () {
+  var input = document.getElementById('u');
+  var form = document.getElementById('f');
+  // Keep the input focused so a plain paste (Cmd/Ctrl+V) lands in it
+  // even if the user clicked away.
+  function refocus() { if (document.activeElement !== input) input.focus(); }
+  refocus();
+  window.addEventListener('focus', refocus);
+  document.addEventListener('click', function (e) {
+    if (e.target === input || e.target.closest('button')) return;
+    refocus();
+  });
+  // If a paste happens anywhere on the page, land it in the input and
+  // submit if it parses as a URL.
+  document.addEventListener('paste', function (e) {
+    if (document.activeElement === input) return; // let native paste do it
+    var text = (e.clipboardData || window.clipboardData).getData('text');
+    if (!text) return;
+    e.preventDefault();
+    input.value = text.trim();
+    input.focus();
+    // If it looks URL-ish, submit immediately.
+    if (/^https?:\/\/\S+|^\S+\.\S+/.test(input.value)) form.requestSubmit();
+  });
+})();
+</script>
 </body>
 </html>
 `
