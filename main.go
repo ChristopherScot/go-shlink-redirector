@@ -271,10 +271,10 @@ const createTmpl = `<!doctype html>
   --fg: #1c1917;
   --muted: #78716c;
   --border: #d6d3d1;
-  --accent: #c2410c;
-  --accent-hover: #9a3412;
+  --accent: #9a3412;
+  --accent-hover: #7c2d12;
   --err: #dc2626;
-  --code-bg: rgba(194,65,12,.10);
+  --code-bg: rgba(154,52,18,.12);
   color-scheme: light dark;
 }
 @media (prefers-color-scheme: dark) {
@@ -283,10 +283,10 @@ const createTmpl = `<!doctype html>
     --fg: #f5f5f4;
     --muted: #a8a29e;
     --border: #44403c;
-    --accent: #ea580c;
-    --accent-hover: #f97316;
+    --accent: #c2410c;
+    --accent-hover: #9a3412;
     --err: #f87171;
-    --code-bg: rgba(249,115,22,.15);
+    --code-bg: rgba(194,65,12,.18);
   }
 }
 * { box-sizing: border-box; }
