@@ -291,9 +291,15 @@ body {
 main { width: 100%; max-width: 40rem; }
 h1 { font-size: 1.6rem; margin: 0 0 .35rem; font-weight: 700; }
 p.hint { color: var(--muted); margin: 0 0 2rem; font-size: 1rem; }
-form { display: grid; gap: 1rem; }
+form {
+  display: flex;
+  gap: .75rem;
+  align-items: stretch;
+  flex-wrap: wrap;
+}
 input[type=url] {
-  width: 100%;
+  flex: 1 1 20rem;
+  min-width: 0;
   padding: 1rem 1.15rem;
   font: inherit;
   font-size: 1.15rem;
@@ -308,9 +314,9 @@ input[type=url]:focus {
   border-color: var(--accent);
 }
 button {
-  padding: .85rem 1.5rem;
+  padding: 1rem 1.75rem;
   font: inherit;
-  font-size: 1rem;
+  font-size: 1.05rem;
   font-weight: 600;
   border: none;
   border-radius: .6rem;
@@ -318,7 +324,7 @@ button {
   color: white;
   cursor: pointer;
   transition: background .15s;
-  justify-self: start;
+  white-space: nowrap;
 }
 button:hover { background: var(--accent-hover); }
 .err { color: var(--err); margin: 0 0 1rem; font-weight: 500; }
