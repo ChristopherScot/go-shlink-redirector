@@ -258,25 +258,25 @@ const createTmpl = `<!doctype html>
 <style>
 :root {
   --bg: #ffffff;
-  --fg: #111827;
-  --muted: #6b7280;
-  --border: #d1d5db;
-  --accent: #2563eb;
-  --accent-hover: #1d4ed8;
+  --fg: #1c1917;
+  --muted: #78716c;
+  --border: #d6d3d1;
+  --accent: #c2410c;
+  --accent-hover: #9a3412;
   --err: #dc2626;
-  --code-bg: rgba(0,0,0,.06);
+  --code-bg: rgba(194,65,12,.10);
   color-scheme: light dark;
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #0b0f19;
-    --fg: #e5e7eb;
-    --muted: #9ca3af;
-    --border: #374151;
-    --accent: #3b82f6;
-    --accent-hover: #60a5fa;
+    --bg: #1c1410;
+    --fg: #f5f5f4;
+    --muted: #a8a29e;
+    --border: #44403c;
+    --accent: #ea580c;
+    --accent-hover: #f97316;
     --err: #f87171;
-    --code-bg: rgba(255,255,255,.08);
+    --code-bg: rgba(249,115,22,.15);
   }
 }
 * { box-sizing: border-box; }
