@@ -271,10 +271,10 @@ const createTmpl = `<!doctype html>
   --fg: #1c1917;
   --muted: #78716c;
   --border: #d6d3d1;
-  --accent: #9a3412;
-  --accent-hover: #7c2d12;
+  --accent: #c2410c;
+  --accent-hover: #9a3412;
   --err: #dc2626;
-  --code-bg: rgba(154,52,18,.12);
+  --code-bg: rgba(194,65,12,.10);
   color-scheme: light dark;
 }
 @media (prefers-color-scheme: dark) {
