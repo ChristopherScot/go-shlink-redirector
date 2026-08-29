@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/http/httputil"
 	"net/url"
 	"os"
 	"strings"
@@ -147,6 +148,21 @@ func main() {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("ok"))
 	})
+	// Proxy shlink's own admin/API/CLI paths straight through so this
+	// service can front the same host without shadowing them. Slug lookup
+	// is a plain GET /{slug}, so leaving /rest, /api, /cli untouched
+	// keeps the shlink dashboard, `shlink-cli`, and the web client's
+	// backend calls working via go.home.
+	shlinkURL, err := url.Parse(cfg.shlinkAPI)
+	if err != nil {
+		logger.Error("bad SHLINK_API_URL", "err", err.Error())
+		os.Exit(1)
+	}
+	proxy := httputil.NewSingleHostReverseProxy(shlinkURL)
+	for _, prefix := range []string{"/rest", "/api", "/cli"} {
+		r.Handle(prefix+"/*", proxy)
+		r.Handle(prefix, proxy)
+	}
 	r.Get("/{slug}", res.handleSlug)
 	r.Get("/", func(w http.ResponseWriter, req *http.Request) {
 		http.Redirect(w, req, cfg.webClientURL, http.StatusFound)
