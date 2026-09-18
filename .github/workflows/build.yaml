@@ -1,0 +1,94 @@
+# Builds and pushes the image. Deployment happens in-cluster:
+# argocd-image-updater watches the registry and commits the new digest to
+# the homelab repo itself, so this workflow needs no homelab credential -
+# GITHUB_TOKEN is issued per run and can only push packages.
+#
+# This is the specless variant (`homelabctl init --no-spec`). Two jobs the
+# spec-first workflow has are absent by design:
+#
+#   - the stale-generated-code check, because nothing here is generated.
+#   - the release tag, which derives its version from openapi.yml's
+#     info.version. A specless service publishes no client, so there is
+#     nothing to version and nothing for a consumer to `go get`. Tag it by
+#     hand if it ever needs a release.
+name: build shlink-redirector
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# Two pushes in quick succession otherwise race to publish :latest, and
+# whichever loses is the digest image-updater may pick up.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Test
+        run: go test -race ./...
+
+      # CGO_ENABLED=0: a cgo binary links against glibc and will not run on
+      # alpine, and that only shows up at container start.
+      #
+      # -X main.version stamps the commit into the binary, so every log
+      # line says which build produced it. Without it main.version stays
+      # "dev" and the field is worse than absent.
+      - name: Build
+        run: |
+          CGO_ENABLED=0 go build \
+            -ldflags "-X main.version=$GITHUB_SHA" \
+            -o bin/app .
+
+      # Downloaded rather than built so CI does not depend on this repo
+      # being able to compile it.
+      - name: Install homelabctl
+        run: curl -fsSL https://github.com/ChristopherScot/ci-scripts/releases/latest/download/homelabctl_linux_amd64.tar.gz | tar -xz
+
+      - name: Check deploy manifests
+        run: ./homelabctl check deploy
+
+      # buildx, because cache-from/cache-to type=gha below need it: the
+      # default docker driver cannot export a cache and fails the build
+      # with "Cache export is not supported for the docker driver".
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        if: github.event_name != 'pull_request'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/christopherscot/go-shlink-redirector
+          # Full SHA: an abbreviated one is not a registry tag and gives
+          # ImagePullBackOff.
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,format=long
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
