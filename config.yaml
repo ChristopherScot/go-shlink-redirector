@@ -50,5 +50,10 @@ resources:
   memoryLimit: 64Mi
 
 ingress:
-  host: go.home.chrisscotmartin.com
+  hosts:
+    # Both names the shortener answers on. shlink's DEFAULT_DOMAIN is
+    # `go`, so every short URL it has ever generated points at the bare
+    # host - dropping it would break every existing link.
+    - go.home.chrisscotmartin.com
+    - go
   public: false

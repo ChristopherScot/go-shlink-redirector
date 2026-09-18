@@ -21,3 +21,24 @@ spec:
                 name: shlink-redirector
                 port:
                   number: 80
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: shlink-redirector-lan
+  namespace: shlink
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+spec:
+  ingressClassName: external
+  rules:
+    - host: go
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: shlink-redirector
+                port:
+                  number: 80
