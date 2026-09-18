@@ -1,0 +1,54 @@
+# yaml-language-server: $schema=config.schema.json
+# The single source of truth for this service. `homelabctl render`
+# regenerates every manifest from it, so change things here rather than
+# editing deploy/ by hand.
+name: shlink-redirector
+team: me-myself-and-i
+runtime: go-service
+
+# The repo is go-shlink-redirector but the service deploys as
+# shlink-redirector, so the module path cannot be derived from either the
+# name or the owner flag - and Go module paths are case-sensitive, so the
+# owner's actual casing matters.
+module: github.com/ChristopherScot/go-shlink-redirector
+
+# server.go is hand-written here; there is no openapi.yml to
+# generate from and no client for consumers to import.
+spec: false
+
+# Deployed beside shlink itself, which is what it fronts.
+namespace: shlink
+port: 3000
+image:
+  repository: ghcr.io/christopherscot/go-shlink-redirector
+
+# WEB_CLIENT_URL and SHORT_DOMAIN are deliberately absent. The running
+# deployment sets WEB_CLIENT_URL and the old README called it required,
+# but no code ever read it. SHORT_DOMAIN was read into a config field
+# that nothing then used. Carrying either forward would be copying
+# configuration that does nothing but look load-bearing.
+env:
+  SHLINK_API_URL: "http://shlink.shlink.svc:8080"
+
+# Its own Vault role rather than borrowing shlink's secret by
+# secretKeyRef: one role, one path, one ServiceAccount.
+secrets:
+  vaultPath: shlink
+  keys:
+    # The property is `api-key`, not the derived `shlink_api_key`: the
+    # path already says shlink, and repeating it would ask Vault for
+    # shlink/shlink_api_key - which does not exist. ESO would then fail
+    # to sync and the pod would start without a key.
+    - SHLINK_API_KEY: api-key
+
+probes:
+  path: /health
+
+resources:
+  cpuRequest: 10m
+  memoryRequest: 16Mi
+  memoryLimit: 64Mi
+
+ingress:
+  host: go.home.chrisscotmartin.com
+  public: false

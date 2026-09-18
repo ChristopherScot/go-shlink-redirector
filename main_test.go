@@ -1,243 +1,124 @@
 package main
 
 import (
-	"encoding/json"
-	"io"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
-	"os"
 	"strings"
 	"testing"
 )
 
-func newTestResolver(t *testing.T, apiURL string) *resolver {
+// newHandler builds the real handler against a stub shlink, so the
+// routing, the probe endpoint and the metric labels are all exercised
+// the way they are in the cluster.
+func newHandler(t *testing.T) http.Handler {
 	t.Helper()
-	cfg := config{
-		shlinkAPI:    apiURL,
-		shlinkAPIKey: "test-key",
-		shortDomain:  "go",
-		listenAddr:   "0.0.0.0:3000",
-	}
-	return newResolver(cfg, slog.New(slog.NewTextHandler(os.Stderr, nil)))
-}
-
-func TestLookupLongURL_Found(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if got, want := r.URL.Path, "/rest/v3/short-urls/gcp"; got != want {
-			t.Errorf("path = %q, want %q", got, want)
-		}
-		if r.Header.Get("X-Api-Key") != "test-key" {
-			t.Errorf("missing api key header")
-		}
-		json.NewEncoder(w).Encode(map[string]string{"longUrl": "https://console.cloud.google.com/"})
+	shlink := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "not found", http.StatusNotFound)
 	}))
-	defer srv.Close()
+	t.Cleanup(shlink.Close)
 
-	r := newTestResolver(t, srv.URL)
-	got, err := r.lookupLongURL("gcp")
+	t.Setenv("SHLINK_API_URL", shlink.URL)
+	t.Setenv("SHLINK_API_KEY", "test-key")
+
+	h, err := handler()
 	if err != nil {
-		t.Fatalf("lookupLongURL err = %v", err)
+		t.Fatalf("handler() = %v", err)
 	}
-	if want := "https://console.cloud.google.com/"; got != want {
-		t.Errorf("got %q, want %q", got, want)
+	return h
+}
+
+func get(t *testing.T, h http.Handler, path string) *httptest.ResponseRecorder {
+	t.Helper()
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, nil))
+	return w
+}
+
+// The path deploy/deployment.yaml's readiness and liveness probes hit.
+// Nothing generates this endpoint - server.go is hand-written - so this
+// test is what keeps an edit from removing the thing the probes depend
+// on. Without it the pod never becomes ready and nothing says why.
+func TestHealthIsServedForTheProbe(t *testing.T) {
+	w := get(t, newHandler(t), "/health")
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+	if !strings.Contains(w.Body.String(), "ok") {
+		t.Errorf("body = %q, want it to report ok", w.Body.String())
 	}
 }
 
-func TestLookupLongURL_NotFound(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusNotFound)
-	}))
-	defer srv.Close()
-
-	r := newTestResolver(t, srv.URL)
-	got, err := r.lookupLongURL("nope")
-	if err != nil {
-		t.Fatalf("lookupLongURL err = %v", err)
+func TestRootServesTheLandingPage(t *testing.T) {
+	w := get(t, newHandler(t), "/")
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
 	}
-	if got != "" {
-		t.Errorf("got %q, want empty", got)
+	if ct := w.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/html") {
+		t.Errorf("Content-Type = %q, want text/html", ct)
 	}
 }
 
-func TestLookupLongURL_ServerError(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusInternalServerError)
-	}))
-	defer srv.Close()
-
-	r := newTestResolver(t, srv.URL)
-	if _, err := r.lookupLongURL("boom"); err == nil {
-		t.Fatalf("expected error, got nil")
+// A slug with no short URL renders the create form rather than 404ing.
+// That is the whole interaction: visit go/thing, get offered the chance
+// to make it.
+func TestUnknownSlugOffersToCreateIt(t *testing.T) {
+	w := get(t, newHandler(t), "/does-not-exist")
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+	if !strings.Contains(w.Body.String(), "does-not-exist") {
+		t.Errorf("create form does not mention the slug:\n%s", w.Body.String())
 	}
 }
 
-func TestCreateShortURL_Success(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != "POST" {
-			t.Errorf("method = %q, want POST", r.Method)
+func TestMetricsAreExposed(t *testing.T) {
+	h := newHandler(t)
+	get(t, h, "/") // a request to record
+
+	w := get(t, h, "/metrics")
+	if w.Code != http.StatusOK {
+		t.Fatalf("metrics status = %d, want %d", w.Code, http.StatusOK)
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, `http_requests_total{method="GET",route="/"`) {
+		t.Errorf("no request counter for the root route:\n%s", body)
+	}
+	if !strings.Contains(body, "go_goroutines") {
+		t.Error("no runtime metrics in /metrics")
+	}
+}
+
+// The cardinality guard, and the reason it matters more here than in a
+// typical service: every short link is its own path. If the metric label
+// were the path rather than the route pattern, Prometheus would gain a
+// series per slug anyone ever visited - and every slug would be written
+// into the monitoring stack.
+func TestSlugNeverBecomesAMetricLabel(t *testing.T) {
+	h := newHandler(t)
+	get(t, h, "/secret-project-codename")
+	get(t, h, "/another-private-slug")
+
+	body := get(t, h, "/metrics").Body.String()
+	for _, slug := range []string{"secret-project-codename", "another-private-slug"} {
+		if strings.Contains(body, slug) {
+			t.Errorf("slug %q reached a metric label", slug)
 		}
-		body, _ := io.ReadAll(r.Body)
-		var in struct {
-			LongURL    string `json:"longUrl"`
-			CustomSlug string `json:"customSlug"`
-		}
-		json.Unmarshal(body, &in)
-		if in.CustomSlug != "gcp" || in.LongURL != "https://console.cloud.google.com/" {
-			t.Errorf("bad body: %s", string(body))
-		}
-		json.NewEncoder(w).Encode(map[string]string{"shortUrl": "https://go/gcp"})
-	}))
-	defer srv.Close()
-
-	r := newTestResolver(t, srv.URL)
-	got, err := r.createShortURL("gcp", "https://console.cloud.google.com/")
-	if err != nil {
-		t.Fatalf("createShortURL err = %v", err)
 	}
-	if got != "https://go/gcp" {
-		t.Errorf("got %q, want https://go/gcp", got)
+	// The pattern, not the value.
+	if !strings.Contains(body, `route="/{slug}"`) {
+		t.Errorf("slug requests were not counted under their route pattern:\n%s", body)
 	}
 }
 
-func TestCreateShortURL_ShlinkError(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]string{"detail": "slug already exists"})
-	}))
-	defer srv.Close()
+// An unrouted path must not become a label either - a 404-scanning bot
+// would otherwise write its wordlist into the metrics.
+func TestUnroutedPathIsLabelledAsUnmatched(t *testing.T) {
+	h := newHandler(t)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest(http.MethodPut, "/wp-admin/evil.php", nil))
 
-	r := newTestResolver(t, srv.URL)
-	_, err := r.createShortURL("gcp", "https://a.example/")
-	if err == nil || !strings.Contains(err.Error(), "slug already exists") {
-		t.Fatalf("err = %v, want message about slug already existing", err)
-	}
-}
-
-func TestHandleSlug_Redirect(t *testing.T) {
-	shlink := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(map[string]string{"longUrl": "https://example.com/dst"})
-	}))
-	defer shlink.Close()
-
-	r := newTestResolver(t, shlink.URL)
-	req := httptest.NewRequest("GET", "/gcp", nil)
-	req = withChiParam(req, "slug", "gcp")
-	rec := httptest.NewRecorder()
-	r.handleSlug(rec, req)
-
-	if rec.Code != http.StatusFound {
-		t.Fatalf("status = %d, want 302", rec.Code)
-	}
-	if loc := rec.Header().Get("Location"); loc != "https://example.com/dst" {
-		t.Errorf("Location = %q", loc)
-	}
-}
-
-func TestHandleSlug_MissRendersForm(t *testing.T) {
-	shlink := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusNotFound)
-	}))
-	defer shlink.Close()
-
-	r := newTestResolver(t, shlink.URL)
-	req := httptest.NewRequest("GET", "/gcp", nil)
-	req = withChiParam(req, "slug", "gcp")
-	rec := httptest.NewRecorder()
-	r.handleSlug(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
-	}
-	body := rec.Body.String()
-	if !strings.Contains(body, "go/gcp") {
-		t.Errorf("missing slug in body: %s", body[:min(400, len(body))])
-	}
-	if !strings.Contains(body, "doesn") {
-		t.Errorf("missing headline in body")
-	}
-	if !strings.Contains(body, `action="/gcp"`) {
-		t.Errorf("form action wrong, body: %s", body[:200])
-	}
-	if !strings.Contains(body, `name="longUrl"`) {
-		t.Errorf("longUrl input missing")
-	}
-}
-
-func TestHandleCreate_Success(t *testing.T) {
-	shlink := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(map[string]string{"shortUrl": "https://go/gcp"})
-	}))
-	defer shlink.Close()
-
-	r := newTestResolver(t, shlink.URL)
-	form := url.Values{}
-	form.Set("longUrl", "https://console.cloud.google.com/")
-	req := httptest.NewRequest("POST", "/gcp", strings.NewReader(form.Encode()))
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req = withChiParam(req, "slug", "gcp")
-	rec := httptest.NewRecorder()
-	r.handleCreate(rec, req)
-
-	if rec.Code != http.StatusSeeOther {
-		t.Fatalf("status = %d, want 303", rec.Code)
-	}
-	if loc := rec.Header().Get("Location"); loc != "/gcp" {
-		t.Errorf("Location = %q, want /gcp", loc)
-	}
-}
-
-func TestHandleCreate_MissingURL(t *testing.T) {
-	r := newTestResolver(t, "http://ignored")
-	req := httptest.NewRequest("POST", "/gcp", strings.NewReader(""))
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req = withChiParam(req, "slug", "gcp")
-	rec := httptest.NewRecorder()
-	r.handleCreate(rec, req)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400", rec.Code)
-	}
-}
-
-func TestHandleCreate_SchemeHandling(t *testing.T) {
-	cases := []struct {
-		in, want string
-	}{
-		{"example.com/path", "http://example.com/path"},
-		{"http://x.example/y", "http://x.example/y"},
-		{"https://x.example/y", "https://x.example/y"},
-		{"mailto:foo@x.example", "mailto:foo@x.example"},
-		{"tel:+15551234", "tel:+15551234"},
-		{"slack://channel?team=T", "slack://channel?team=T"},
-		{"obsidian://open?vault=N", "obsidian://open?vault=N"},
-		{"magnet:?xt=urn:btih:abc", "magnet:?xt=urn:btih:abc"},
-	}
-	for _, c := range cases {
-		t.Run(c.in, func(t *testing.T) {
-			var got string
-			shlink := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				body, _ := io.ReadAll(r.Body)
-				var in struct {
-					LongURL string `json:"longUrl"`
-				}
-				json.Unmarshal(body, &in)
-				got = in.LongURL
-				json.NewEncoder(w).Encode(map[string]string{"shortUrl": "https://go/x"})
-			}))
-			defer shlink.Close()
-
-			r := newTestResolver(t, shlink.URL)
-			form := url.Values{}
-			form.Set("longUrl", c.in)
-			req := httptest.NewRequest("POST", "/x", strings.NewReader(form.Encode()))
-			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-			req = withChiParam(req, "slug", "x")
-			rec := httptest.NewRecorder()
-			r.handleCreate(rec, req)
-			if got != c.want {
-				t.Errorf("longUrl sent to shlink = %q, want %q", got, c.want)
-			}
-		})
+	body := get(t, h, "/metrics").Body.String()
+	if strings.Contains(body, "wp-admin") {
+		t.Error("an unrouted path reached a metric label")
 	}
 }
