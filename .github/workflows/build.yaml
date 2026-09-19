@@ -34,10 +34,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # go-version-file and cache-dependency-path are ACTION INPUTS, not
+      # shell commands, so defaults.run.working-directory does not apply
+      # to them - they resolve from the repository root. In a monorepo a
+      # bare `go.mod` is a path to nothing, and setup-go fails with "the
+      # specified go version file at: go.mod does not exist" before a
+      # single test has run.
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: true
+          cache-dependency-path: go.sum
 
       - name: Test
         run: go test -race ./...
@@ -62,11 +69,31 @@ jobs:
       - name: Check deploy manifests
         run: ./homelabctl check deploy
 
+      # The manifests are derived from config.yaml, so a config change
+      # that nobody re-rendered leaves them describing the old service -
+      # and `check deploy` would not notice, because it validates what
+      # is there rather than comparing it to what the config says.
+      #
+      # render takes no image ref and preflight degrades to a notice
+      # without a cluster, so this is deterministic here: the same
+      # config always produces the same files.
+      - name: Check manifests match config.yaml
+        run: |
+          ./homelabctl render
+          git diff --exit-code -- deploy/ \
+            || { echo "::error::manifests are stale - run 'homelabctl render' and commit"; exit 1; }
+
       # buildx, because cache-from/cache-to type=gha below need it: the
       # default docker driver cannot export a cache and fails the build
       # with "Cache export is not supported for the docker driver".
       - uses: docker/setup-buildx-action@v3
 
+      # ghcr.io specifically: github.actor + GITHUB_TOKEN authenticate
+      # to GitHub's registry and nothing else. Pointing image.repository
+      # at ECR or Docker Hub means replacing this step with that
+      # registry's login action and a stored credential - and note
+      # `homelabctl init --overwrite` rewrites this file from the
+      # template, which would discard that edit.
       - uses: docker/login-action@v3
         if: github.event_name != 'pull_request'
         with:
