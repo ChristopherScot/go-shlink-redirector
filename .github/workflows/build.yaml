@@ -64,7 +64,7 @@ jobs:
       # Downloaded rather than built so CI does not depend on this repo
       # being able to compile it.
       - name: Install homelabctl
-        run: curl -fsSL https://github.com/ChristopherScot/ci-scripts/releases/latest/download/homelabctl_linux_amd64.tar.gz | tar -xz
+        run: curl -fsSL https://github.com/ChristopherScot/homelabctl/releases/latest/download/homelabctl_linux_amd64.tar.gz | tar -xz
 
       - name: Check deploy manifests
         run: ./homelabctl check deploy
