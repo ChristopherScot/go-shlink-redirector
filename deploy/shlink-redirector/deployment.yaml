@@ -25,6 +25,7 @@ spec:
         k8s.grafana.com/scrape: "true"
         k8s.grafana.com/metrics.path: "/metrics"
         k8s.grafana.com/metrics.portNumber: "3000"
+        reloader.stakater.com/secret-reload-on-change: "shlink-redirector-secrets"
       labels:
         app: shlink-redirector
         team: me-myself-and-i
