@@ -44,6 +44,21 @@ spec:
           image: ghcr.io/christopherscot/go-shlink-redirector:latest
           ports:
             - containerPort: 3000
+          # Stated rather than left to Kubernetes, whose default for a :latest
+          # image is Always.
+          #
+          # This depends on argocd-image-updater pinning the image by digest (see
+          # kustomization.yaml). A digest names exactly one image, so a new build
+          # arrives as a new reference and is pulled, while an unchanged one is
+          # reused from the node's cache. Always would add a registry round trip
+          # to every start, and a pod scaling up from zero could not start while
+          # the registry was unreachable, even with the image cached.
+          #
+          # If the pin is missing - the updater has not written one yet, or is
+          # skipping this app - the pod runs bare :latest, and a node that already
+          # has some :latest keeps it, restart or not. Check the live Application's
+          # spec.source.kustomize.images for a digest.
+          imagePullPolicy: IfNotPresent
           env:
             - name: PORT
               value: "3000"

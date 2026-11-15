@@ -138,7 +138,8 @@
                 "properties": {
                   "name": { "type": "string" },
                   "tls": { "type": "boolean" },
-                  "public": { "type": "boolean", "description": "Route THIS host via the internet-facing controller. Omit to follow ingress.public. Per host, so a service can hold a LAN name and a public one without dragging one onto the other's controller." }
+                  "public": { "type": "boolean", "description": "Route THIS host via the internet-facing controller. Omit to follow ingress.public. Per host, so a service can hold a LAN name and a public one without dragging one onto the other's controller." },
+                  "rateLimitRPS": { "type": "integer", "minimum": 1, "description": "Requests per second allowed from ONE CLIENT IP on this host. Per IP, not per user and not a total, and per controller replica. Covers every path on the host: nginx cannot vary a limit by path." }
                 }
               }
             ]
@@ -152,7 +153,10 @@
     "probes": {
       "type": "object",
       "additionalProperties": false,
-      "properties": { "path": { "type": "string", "default": "/healthz" } }
+      "properties": {
+        "path": { "type": "string", "default": "/healthz", "description": "Path the LIVENESS probe hits, and the readiness probe too unless readyPath overrides it. Liveness asks whether to restart this pod." },
+        "readyPath": { "type": "string", "description": "Path the READINESS probe hits, when it differs from path. Readiness asks whether to send this pod traffic - a service with a database can be alive and unable to serve. Omit to use path, which is what a service with only one health endpoint wants." }
+      }
     },
     "resources": {
       "type": "object",
